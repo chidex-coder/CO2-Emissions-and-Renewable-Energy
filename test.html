@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>🌍 Ultimate Emissions & Renewables Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <style>
+    :root { --bg:#f5f5f5; --fg:#222; --card:#fff; --muted:#666; --border:#ddd; --border-2:#ccc; }
+    body.dark { --bg:#121212; --fg:#f5f5f5; --card:#1e1e1e; --muted:#aaa; --border:#333; --border-2:#444; }
+    body { font-family: system-ui, Arial, sans-serif; background:var(--bg); color:var(--fg); margin:0; padding:16px; }
+    h1 { margin:0 0 12px; }
+    .controls { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin:8px 0 16px; }
+    .controls label { display:flex; flex-direction:column; gap:6px; font-size:14px; }
+    select, input, button { padding:8px 10px; border-radius:8px; border:1px solid var(--border-2); background:var(--card); color:var(--fg); }
+    .btn { cursor:pointer; border:1px solid var(--border-2); }
+    .btn.primary { background:#2d7ef7; color:#fff; border-color:#2d7ef7; }
+    .btn.warn { background:#e74c3c; color:#fff; border-color:#e74c3c; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .section-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+    #pinned { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
+    #summary { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }
+    .summary-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px; min-width:220px; max-width:280px; box-shadow:0 1px 3px rgba(0,0,0,.08); cursor:grab; position:relative; }
+    .summary-header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+    .summary-title { font-weight:700; }
+    .summary-sub { font-size:12px; color:var(--muted); }
+    .chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; background:rgba(125,125,125,.08); border:1px dashed var(--border-2); padding:3px 8px; border-radius:999px; }
+    .summary-actions { display:flex; gap:6px; }
+    .icon-btn { cursor:pointer; border:none; background:transparent; font-size:16px; line-height:1; padding:4px; border-radius:8px; }
+    .icon-btn:hover { background:rgba(127,127,127,.15); }
+    .leaderboard { margin-top:16px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid var(--border); padding:8px; text-align:left; }
+    #chart { height:620px; }
+    .muted { color:var(--muted); }
+    /* modal */
+    .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.4); display:none; align-items:center; justify-content:center; z-index:1000; }
+    .modal { width:min(900px,92vw); background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.35); overflow:hidden; }
+    .modal-head { display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--border); }
+    .modal-body { padding:12px 14px; }
+    .modal-close { background:transparent; border:none; font-size:20px; cursor:pointer; }
+    .kbd { font:12px/1.2 monospace; background:rgba(127,127,127,.12); padding:2px 6px; border-radius:6px; border:1px solid var(--border); }
+    .tip { font-size:12px; color:var(--muted); margin-top:6px; }
+  </style>
+</head>
+<body>
+  <h1>🌍 Ultimate Emissions & Renewables Dashboard</h1>
+
+  <div class="controls">
+    <label>Region
+      <select id="region" multiple size="4"></select>
+    </label>
+    <label>Country
+      <select id="country" multiple size="4"></select>
+    </label>
+    <label>Metrics
+      <select id="metrics" multiple size="4">
+        <option value="CO2">CO₂</option>
+        <option value="Renewables_equivalent_primary_energy">Renewables</option>
+        <option value="Total_GHG">Total GHG</option>
+        <option value="CO2_per_capita">CO₂ per Capita</option>
+      </select>
+    </label>
+    <label>Top N
+      <input type="number" id="topN" value="10" min="1" max="50" />
+    </label>
+    <button class="btn" onclick="toggleDark()">🌙 Dark</button>
+    <button class="btn" onclick="document.getElementById('fileInput').click()">📂 Upload CSV</button>
+    <input type="file" id="fileInput" style="display:none" accept=".csv" />
+    <button class="btn" onclick="loadRemote()">🌐 Load Online Data</button>
+    <button class="btn" onclick="loadSample()">📊 Load Sample</button>
+    <button class="btn warn" onclick="resetAll()">🔄 Reset to Sample</button>
+  </div>
+
+  <!-- Pinned summary cards -->
+  <div id="pinned" class="section-card" style="display:none;"></div>
+
+  <!-- Draggable summary cards -->
+  <div id="summary"></div>
+
+  <!-- Chart -->
+  <div id="chart" class="section-card"></div>
+
+  <!-- Leaderboard -->
+  <div class="leaderboard section-card">
+    <div class="row" style="justify-content:space-between; align-items:center;">
+      <h3 style="margin:0;">🏆 Top Countries</h3>
+      <span class="muted">Tip: Click a row to copy values <span class="kbd">CTRL/CMD+C</span></span>
+    </div>
+    <table id="leaderboardTable">
+      <thead><tr><th>Rank</th><th>Country</th><th>Region</th><th>Metric</th><th>Value</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- Modal for expanded card -->
+  <div id="modalBackdrop" class="modal-backdrop" onclick="closeModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head">
+        <div>
+          <div id="modalTitle" style="font-weight:700;"></div>
+          <div id="modalSub" class="muted" style="font-size:12px;"></div>
+        </div>
+        <button class="modal-close" onclick="closeModal()">✖</button>
+      </div>
+      <div class="modal-body">
+        <div id="modalMetrics" class="row" style="margin-bottom:8px;"></div>
+        <div id="modalChart" style="height:420px;"></div>
+        <div class="tip">Tip: Use your dashboard metric selection to change the expanded chart lines.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------------------- Data Store ----------------------
+    let df = [];
+    let autoRefreshTimer;
+    const pinnedKeys = new Set(); // key: `${country}|${region}`
+
+    // ---------------------- Loaders ----------------------
+    function loadRemote(){
+      Papa.parse("https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv", {
+        download:true, header:true, dynamicTyping:true,
+        complete:(res)=>{ df = sanitize(res.data); init(); }
+      });
+    }
+
+    function loadSample(){
+      const csv = `Year,Region_Canonical,Country,CO2,Renewables_equivalent_primary_energy,Total_GHG,CO2_per_capita
+2018,Europe,Germany,750,40,820,9.2
+2018,Europe,France,500,55,560,7.1
+2018,Asia,China,9500,20,10200,7.0
+2018,North America,United States,5100,25,5400,15.5
+2019,Europe,Germany,720,42,790,8.8
+2019,Europe,France,480,57,540,7.0
+2019,Asia,China,9800,23,10500,7.2
+2019,North America,United States,5000,28,5300,15.2
+2020,Europe,Germany,650,50,720,7.9
+2020,Europe,France,450,60,510,6.7
+2020,Asia,China,9300,28,10050,7.1
+2020,North America,United States,4700,33,5000,14.7
+2021,Europe,Germany,680,52,750,8.2
+2021,Europe,France,460,62,520,6.8
+2021,Asia,China,9600,31,10300,7.4
+2021,North America,United States,4900,36,5200,15.0`;
+      const parsed = Papa.parse(csv, {header:true, dynamicTyping:true}).data;
+      df = sanitize(parsed);
+      init();
+    }
+
+    document.getElementById("fileInput").addEventListener("change",(e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      Papa.parse(file, { header:true, dynamicTyping:true,
+        complete:(res)=>{ df = sanitize(res.data); init(); }
+      });
+    });
+
+    function sanitize(rows){
+      // keep only useful fields if OWID data
+      return rows
+        .filter(r => r && (r.Year || r.year) && (r.Country || r.country || r.country_name))
+        .map(r => ({
+          Year: + (r.Year ?? r.year),
+          Region_Canonical: r.Region_Canonical ?? r.region ?? r.world_region ?? r.un_region ?? r.continent ?? null,
+          Country: r.Country ?? r.country ?? r.country_name ?? r.iso_code ?? null,
+          CO2: num(r.CO2 ?? r.co2),
+          Renewables_equivalent_primary_energy: num(r.Renewables_equivalent_primary_energy ?? r.renewables_electricity ?? r.renewables_share_energy),
+          Total_GHG: num(r.Total_GHG ?? r.ghg_excluding_lucf ?? r.ghg),
+          CO2_per_capita: num(r.CO2_per_capita ?? r.co2_per_capita)
+        }))
+        .filter(r => r.Year && r.Country);
+      function num(v){ const n = +v; return isFinite(n) ? n : null; }
+    }
+
+    // ---------------------- Init ----------------------
+    function init(){
+      // populate regions
+      const regionEl = document.getElementById("region");
+      const regions = Array.from(new Set(df.map(d => d.Region_Canonical).filter(Boolean))).sort();
+      regionEl.innerHTML = `<option value="Global" selected>Global</option>` + regions.map(r=>`<option value="${r}">${r}</option>`).join("");
+      regionEl.addEventListener("change", onRegionChange);
+      onRegionChange();
+
+      // metrics & topN listeners
+      document.getElementById("metrics").addEventListener("change", updateAll);
+      document.getElementById("topN").addEventListener("input", updateLeaderboard);
+
+      updateAll();
+
+      if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+      autoRefreshTimer = setInterval(updateAll, 60000); // 1 min
+    }
+
+    function onRegionChange(){
+      const regionSel = selectedValues(document.getElementById("region"));
+      const countryEl = document.getElementById("country");
+      let countries = [];
+      if (regionSel.includes("Global")) {
+        countries = Array.from(new Set(df.map(d => d.Country))).sort();
+      } else {
+        countries = Array.from(new Set(df.filter(d => regionSel.includes(d.Region_Canonical)).map(d => d.Country))).sort();
+      }
+      countryEl.innerHTML = countries.map(c => `<option value="${c}">${c}</option>`).join("");
+      countryEl.addEventListener("change", updateAll, { once: true });
+    }
+
+    function resetAll(){
+      pinnedKeys.clear();
+      // reset selections
+      document.getElementById("region").selectedIndex = 0; // Global
+      onRegionChange();
+      // clear country selection
+      const cSel = document.getElementById("country");
+      for (const opt of cSel.options) opt.selected = false;
+      // default metrics: CO2
+      const mSel = document.getElementById("metrics");
+      for (const opt of mSel.options) opt.selected = false;
+      [...mSel.options].find(o=>o.value==="CO2").selected = true;
+      document.getElementById("topN").value = 10;
+      loadSample(); // reload sample + re-init via loadSample -> init()
+    }
+
+    // ---------------------- Update Orchestrator ----------------------
+    function updateAll(){
+      renderSummary();
+      renderChart();
+      renderLeaderboard();
+    }
+
+    // ---------------------- Helpers ----------------------
+    function selectedValues(sel){
+      return [...sel.selectedOptions].map(o => o.value);
+    }
+
+    function latestYear(rows){ return Math.max(...rows.map(r => r.Year)); }
+
+    function keyOf(country, region){ return `${country}|${region}`; }
+
+    // ---------------------- Summary (with Pin & Expand) ----------------------
+    function renderSummary(){
+      const summaryDiv = document.getElementById("summary");
+      const pinnedDiv = document.getElementById("pinned");
+      summaryDiv.innerHTML = "";
+      pinnedDiv.innerHTML = "";
+      pinnedDiv.style.display = pinnedKeys.size ? "flex" : "none";
+
+      const regionSel = selectedValues(document.getElementById("region"));
+      const countrySel = selectedValues(document.getElementById("country"));
+      const metricSel = selectedValues(document.getElementById("metrics"));
+      if (metricSel.length === 0) return;
+
+      // Filter rows according to selections
+      let rows = df;
+      if (!regionSel.includes("Global")) rows = rows.filter(d => regionSel.includes(d.Region_Canonical));
+      if (countrySel.length) rows = rows.filter(d => countrySel.includes(d.Country));
+
+      if (!rows.length) return;
+
+      const y = latestYear(rows);
+      const latest = rows.filter(r => r.Year === y);
+
+      // Create cards
+      latest.slice(0, 12).forEach((r, i) => {
+        const k = keyOf(r.Country || "Global", r.Region_Canonical || "Global");
+        const card = document.createElement("div");
+        card.className = "summary-card";
+        card.setAttribute("draggable","true");
+        card.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", k));
+        card.addEventListener("dragover", e => e.preventDefault());
+        card.addEventListener("drop", e => e.preventDefault()); // simple drag visuals
+
+        // header
+        const header = document.createElement("div");
+        header.className = "summary-header";
+
+        const titleWrap = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "summary-title";
+        title.textContent = r.Country || "Global";
+        const sub = document.createElement("div");
+        sub.className = "summary-sub";
+        sub.textContent = `${r.Region_Canonical || "Global"} • ${y}`;
+        titleWrap.appendChild(title);
+        titleWrap.appendChild(sub);
+
+        const actions = document.createElement("div");
+        actions.className = "summary-actions";
+
+        const pinBtn = document.createElement("button");
+        pinBtn.className = "icon-btn";
+        pinBtn.title = pinnedKeys.has(k) ? "Unpin" : "Pin";
+        pinBtn.textContent = pinnedKeys.has(k) ? "📌" : "📍";
+        pinBtn.onclick = () => { 
+          if (pinnedKeys.has(k)) pinnedKeys.delete(k); else pinnedKeys.add(k);
+          renderSummary();
+        };
+
+        const expandBtn = document.createElement("button");
+        expandBtn.className = "icon-btn";
+        expandBtn.title = "Expand";
+        expandBtn.textContent = "⤢";
+        expandBtn.onclick = () => openModal(r.Country, r.Region_Canonical, metricSel);
+
+        actions.appendChild(pinBtn);
+        actions.appendChild(expandBtn);
+
+        header.appendChild(titleWrap);
+        header.appendChild(actions);
+
+        // body: metrics
+        const body = document.createElement("div");
+        metricSel.forEach(m => {
+          const chip = document.createElement("div");
+          chip.className = "chip";
+          chip.innerHTML = `<strong>${m}</strong> · ${formatNum(r[m])}`;
+          body.appendChild(chip);
+        });
+
+        card.appendChild(header);
+        card.appendChild(body);
+
+        // place into pinned or summary
+        (pinnedKeys.has(k) ? pinnedDiv : summaryDiv).appendChild(card);
+      });
+    }
+
+    // ---------------------- Modal (Expand) ----------------------
+    function openModal(country, region, metricSel){
+      const backdrop = document.getElementById("modalBackdrop");
+      document.getElementById("modalTitle").textContent = country || "Global";
+      document.getElementById("modalSub").textContent = region ? `${region}` : "Global";
+      const metricsWrap = document.getElementById("modalMetrics");
+      metricsWrap.innerHTML = "";
+      metricSel.forEach(m => {
+        const pill = document.createElement("div");
+        pill.className = "chip";
+        pill.textContent = m;
+        metricsWrap.appendChild(pill);
+      });
+      // Build chart
+      const seriesRows = df.filter(r => r.Country === country && (region ? r.Region_Canonical === region : true));
+      const traces = metricSel.map(m => ({
+        x: seriesRows.map(r => r.Year),
+        y: seriesRows.map(r => r[m]),
+        mode: "lines+markers",
+        name: m
+      }));
+      Plotly.newPlot("modalChart", traces, {
+        title: `${country} — Detailed Trend`,
+        xaxis:{title:"Year"},
+        yaxis:{title:"Value"},
+        margin:{t:40}
+      }, {responsive:true});
+      backdrop.style.display = "flex";
+    }
+
+    function closeModal(e){
+      document.getElementById("modalBackdrop").style.display = "none";
+      const mc = document.getElementById("modalChart");
+      if (mc && mc.data) Plotly.purge("modalChart");
+    }
+
+    // ---------------------- Chart ----------------------
+    function renderChart(){
+      const regionSel = selectedValues(document.getElementById("region"));
+      const metricSel = selectedValues(document.getElementById("metrics"));
+      if (!metricSel.length) { Plotly.purge("chart"); return; }
+
+      const traces = [];
+      const regionsToPlot = regionSel.length ? regionSel : ["Global"];
+
+      regionsToPlot.forEach(region => {
+        metricSel.forEach(metric => {
+          let rows = region === "Global" ? df : df.filter(d => d.Region_Canonical === region);
+          const grouped = {};
+          rows.forEach(r => {
+            if (r[metric] == null) return;
+            grouped[r.Year] = (grouped[r.Year] ?? 0) + (+r[metric] || 0);
+          });
+          const X = Object.keys(grouped).map(Number).sort((a,b)=>a-b);
+          const Y = X.map(y => grouped[y]);
+          traces.push({
+            x: X, y: Y, mode: "lines+markers", name: `${region} — ${metric}`
+          });
+        });
+      });
+
+      Plotly.newPlot("chart", traces, {
+        title: "Emissions & Renewables",
+        xaxis:{ title:"Year", rangeslider:{ visible:true } },
+        yaxis:{ title:"Value" },
+        hovermode:"x unified",
+        margin:{t:50}
+      }, {responsive:true});
+    }
+
+    // ---------------------- Leaderboard ----------------------
+    function renderLeaderboard(){
+      const topN = +document.getElementById("topN").value || 10;
+      const metricSel = selectedValues(document.getElementById("metrics"));
+      if (!metricSel.length) return;
+      const metric = metricSel[0];
+
+      const y = latestYear(df);
+      const rows = df.filter(r => r.Year === y && r[metric] != null)
+                     .sort((a,b) => (+b[metric]||0) - (+a[metric]||0))
+                     .slice(0, topN);
+
+      const tbody = document.querySelector("#leaderboardTable tbody");
+      tbody.innerHTML = "";
+      rows.forEach((r,i) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${i+1}</td><td>${r.Country}</td><td>${r.Region_Canonical ?? ""}</td><td>${metric}</td><td>${formatNum(r[metric])}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // ---------------------- Utilities ----------------------
+    function toggleDark(){ document.body.classList.toggle("dark"); }
+    function formatNum(v){ return (v==null || !isFinite(v)) ? "–" : (Math.abs(v)>=1000 ? v.toLocaleString() : (+v).toFixed(2).replace(/\.00$/,'')); }
+
+    // ---------------------- Boot ----------------------
+    loadSample(); // default; you can switch to loadRemote() if preferred
+  </script>
+</body>
+</html>
