@@ -1,0 +1,15 @@
+Scope,Region,Metric,order,aic
+Region,Africa,co2_sum,"(1, 1, 2)",274.6808000019483
+Region,Africa,renewables_sum,"(1, 1, 1)",98.6542163240627
+Region,Asia,co2_sum,"(1, 1, 2)",417.746380182089
+Region,Asia,renewables_sum,"(2, 0, 2)",197.04410626432343
+Region,Australia,co2_sum,"(1, 1, 2)",185.40905828895535
+Region,Australia,renewables_sum,"(2, 1, 2)",129.2728096424508
+Region,Europe,co2_sum,"(0, 1, 2)",373.3774471611791
+Region,Europe,renewables_sum,"(1, 1, 2)",268.8061189773135
+Region,North America,co2_sum,"(2, 1, 2)",380.54947605562853
+Region,North America,renewables_sum,"(0, 1, 2)",113.31997043482046
+Region,South America,co2_sum,"(1, 1, 2)",295.29544626869637
+Region,South America,renewables_sum,"(0, 1, 2)",192.95406924119752
+Global,World,co2_sum,"(1, 1, 2)",449.9056693502558
+Global,World,renewables_sum,"(1, 1, 2)",276.67794791863685
